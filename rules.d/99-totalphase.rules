@@ -1,0 +1,9 @@
+# This file causes the mode of all Total Phase usb devices to be made
+# writable for any user.
+
+# Aarvark I2C/SPI Host Adapter
+ACTION!="add|change", GOTO="totalphase_end"
+
+SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="e0d0", MODE="0666", GROUP="dialout"
+
+LABEL="totalphase_end"
