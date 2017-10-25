@@ -10,7 +10,7 @@ import numpy as np
 import math
 
 # Example:
-# python ./xyplot_mpl.py --xdata=VG --ydata=ID gm 0krad_nfet5_*.csv
+# python ./xyplot_mpl.py --xdata=VG --ydata=ID VD=0.05 gm 0krad_nfet5_*.csv
 
 parser = argparse.ArgumentParser(description='Plot')
 parser.add_argument('--xdata', dest="xdata", action="store", type=str, default='x', help='xdata name')
@@ -25,6 +25,8 @@ parser.add_argument('--ymax', dest="ymax", action="store", type=float, default=N
 parser.add_argument('--ylabel', dest="ylabel", action="store", type=str, default=None, help='ydata label')
 parser.add_argument('--ylog', dest="ylog", action="store_true", default=False, help='ydata log')
 
+parser.add_argument('--title', dest="title", action="store", type=str, default=None, help='Plot title')
+
 parser.add_argument('--output', dest="output", action="store", type=str, default='foo.png', help='Output filename')
 parser.add_argument('--mplstyle', dest="mplstyle", action="store", type=str, default=None, help='mplstyle file')
 parser.add_argument('--dpi', dest="dpi", action="store", type=int, default=90, help='Output DPI')
@@ -34,7 +36,15 @@ parser.add_argument('--height', dest="height", action="store", type=float, defau
 args,unknown_args = parser.parse_known_args()
 csvfiles=[]
 commands=[]
+where=dict()
 for xx in unknown_args:
+    # Look for key=value, filenames, and commands
+    if '=' in xx:
+        (k,v) = xx.split('=')
+        try:
+            where[k]=float(v)
+        except:
+            where[k]=v
     if os.path.exists(xx):
         csvfiles.append(xx)
     else:
@@ -51,9 +61,22 @@ if args.mplstyle:
 #fh = open(pfile,'r')
 #fh.close()
 #data = {'x': [0,1,2,3,4,5], 'y': [2,3,4,5,6,7]}
+numSeries=0
 for csvfile in csvfiles:
-    data = np.genfromtxt(csvfile, delimiter=',',names=[args.xdata,args.ydata])
-    data = dict({args.xdata: [xx[0] for xx in data], args.ydata: [xx[1] for xx in data]})
+    #data = np.genfromtxt(csvfile, delimiter=',',names=[args.xdata,args.ydata])
+    # Extract and filter data
+    data = np.genfromtxt(csvfile, delimiter=',',names=True)
+    header = data.dtype.names
+    for k in where:
+        keycol=header.index(k)
+        data = filter(lambda x: x[keycol] == where[k], data)
+    xcol=header.index(args.xdata)
+    ycol=header.index(args.ydata)
+    data = filter(lambda x: x[xcol] != '', data)
+    data = dict({args.xdata: [xx[xcol] for xx in data], args.ydata: [xx[ycol] for xx in data]})
+
+    if len(data[args.xdata]) == 0:
+        continue
 
     xdata=[]
     ydata=[]
@@ -91,14 +114,25 @@ for csvfile in csvfiles:
                     tdata[i] = 1e6*dy/dx
                 except:
                     tdata[i] = None
-            ydata = tdata                            
+            ydata = tdata
     ax.plot(xdata,ydata,label=csvfile)
+    numSeries=numSeries+1
+
+if numSeries == 0:
+    raise Exception("No data found")
 
 ###############################################################################
-# Legend
+# Legend and Title
 ###############################################################################
-if len(csvfiles) > 1:
-    plt.legend()
+handles, labels = ax.get_legend_handles_labels()
+labels = [ os.path.splitext(os.path.split(x)[-1])[0] for x in labels ]
+if numSeries > 1:
+    plt.legend(handles,labels)
+if args.title is None:
+    title=', '.join(['%s=%s'%(key,str(value)) for (key,value) in where.iteritems()])
+    plt.title(title)
+else:
+    plt.title(args.title)
     
 ###############################################################################
 # X axis
