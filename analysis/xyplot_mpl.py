@@ -6,8 +6,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.pyplot as plt
 import matplotlib.patches as mp
+import scipy.integrate
 import numpy as np
 import math
+from parameter_extraction import *
 
 # Example:
 # python ./xyplot_mpl.py --xdata=VG --ydata=ID VD=0.05 gm 0krad_nfet5_*.csv
@@ -18,14 +20,17 @@ parser.add_argument('--xmin', dest="xmin", action="store", type=float, default=N
 parser.add_argument('--xmax', dest="xmax", action="store", type=float, default=None, help='xdata max')
 parser.add_argument('--xlabel', dest="xlabel", action="store", type=str, default=None, help='xdata label')
 parser.add_argument('--xlog', dest="xlog", action="store_true", default=False, help='xdata log')
+parser.add_argument('--xscale', dest="xscale", action="store", type=float, default=1, help='xdata scale')
 
-parser.add_argument('--ydata', dest="ydata", action="store", type=str, default='y', help='ydata name')
+parser.add_argument('--ydata', dest="ydata", action="store", type=str, default='y', help='Comma separated list of ydata names')
 parser.add_argument('--ymin', dest="ymin", action="store", type=float, default=None, help='ydata min')
 parser.add_argument('--ymax', dest="ymax", action="store", type=float, default=None, help='ydata max')
 parser.add_argument('--ylabel', dest="ylabel", action="store", type=str, default=None, help='ydata label')
 parser.add_argument('--ylog', dest="ylog", action="store_true", default=False, help='ydata log')
+parser.add_argument('--yscale', dest="yscale", action="store", type=float, default=1, help='ydata scale')
 
 parser.add_argument('--title', dest="title", action="store", type=str, default=None, help='Plot title')
+parser.add_argument('--caption', dest="caption", action="store", type=str, default='', help='Figure caption')
 
 parser.add_argument('--output', dest="output", action="store", type=str, default='foo.png', help='Output filename')
 parser.add_argument('--mplstyle', dest="mplstyle", action="store", type=str, default=None, help='mplstyle file')
@@ -50,74 +55,61 @@ for xx in unknown_args:
     else:
         commands.append(xx)
 
+if args.mplstyle:
+    plt.style.use(args.mplstyle)        
 fig,axes = plt.subplots(1,1,sharex=True)
 ax=axes
-if args.mplstyle:
-    plt.style.use(args.mplstyle)
 
 ###############################################################################
 # Read datafile
 ###############################################################################
-#fh = open(pfile,'r')
-#fh.close()
-#data = {'x': [0,1,2,3,4,5], 'y': [2,3,4,5,6,7]}
 numSeries=0
 for csvfile in csvfiles:
-    #data = np.genfromtxt(csvfile, delimiter=',',names=[args.xdata,args.ydata])
-    # Extract and filter data
-    data = np.genfromtxt(csvfile, delimiter=',',names=True)
-    header = data.dtype.names
-    for k in where:
-        keycol=header.index(k)
-        data = filter(lambda x: x[keycol] == where[k], data)
-    xcol=header.index(args.xdata)
-    ycol=header.index(args.ydata)
-    data = filter(lambda x: x[xcol] != '', data)
-    data = dict({args.xdata: [xx[xcol] for xx in data], args.ydata: [xx[ycol] for xx in data]})
-
-    if len(data[args.xdata]) == 0:
-        continue
-
-    xdata=[]
-    ydata=[]
-
-    if type(data) == list: # If a list of dicts eg [{'x': 1, 'y': 2},...]
-        pass
-    elif type(data) == dict: # If a dict of lists {'x': [1, ...], 'y': [2, ....]}
-        tdata=['']*len(data[args.xdata])
-        for t in range(len(data[args.xdata])):
-            tdata[t] = dict({args.xdata: data[args.xdata][t],
-                             args.ydata: data[args.ydata][t]})
-        data = tdata
-        if len(xdata) > len(ydata):
-            raise Exception("Insufficent ydata")
-    else:
-        raise Exception("Data file must either be a list of dicts or a dict of lists.")
-
-    # Ensure that the data are sorted
-    data = sorted(data, key=lambda x: x[args.xdata])
-    xdata = [ xx[args.xdata] for xx in data ]
-    ydata = [ yy[args.ydata] for yy in data ]
-
+    data=read_data(csvfile,args.xdata,(args.ydata).split(','),where)
+    xdata=data[0]
+    xscaleddata=[ xx*float(args.xscale) for xx in xdata ]
+    # Aggregating commands
     for cmd in commands:
-        tdata=[0]*len(ydata)
-        #######################################################################
-        # Transconductance
-        #######################################################################
-        if cmd == 'gm':
-            args.ylabel = "gm (uS)"
-            for i in range(1,len(ydata)-1):
-                try:
-                    # Central difference
-                    dx = (xdata[i+1]-xdata[i-1]) #(xdata[i+1]-xdata[i])
-                    dy = (ydata[i+1]-ydata[i-1]) #(ydata[i+1]-ydata[i])
-                    tdata[i] = 1e6*dy/dx
-                except:
-                    tdata[i] = None
-            ydata = tdata
-    ax.plot(xdata,ydata,label=csvfile)
-    numSeries=numSeries+1
+        if cmd == "avg":
+            avgvals=[0]*len(xdata)
+            for i in range(len(xdata)):
+                avgvals[i] = sum([ ydata[i] for ydata in data[1:] ]) / \
+                             float(len(data)-1)
+            data = [xdata,avgvals]
+        if cmd == "min":
+            minvals=[0]*len(xdata)
+            for i in range(len(xdata)):
+                minvals[i] = min([ ydata[i] for ydata in data[1:] ])
+            data = [xdata,minvals]
+        if cmd == "max":
+            maxvals=[0]*len(xdata)
+            for i in range(len(xdata)):
+                maxvals[i] = max([ ydata[i] for ydata in data[1:] ])
+            data = [xdata,maxvals]
 
+    for ydata in data[1:]:
+        for cmd in commands:
+            tdata=[0]*len(ydata)
+            ###################################################################
+            # Transconductance
+            ###################################################################
+            if cmd == 'gm':
+                args.ylabel = "gm (uS)"
+                ydata = [1e6*x for x in gm(xdata,ydata)][1:-1]
+                xdata = xdata[1:-1]
+            if cmd == 'abs':
+                args.ylabel = "abs(%s)" %(args.ylabel)
+                ydata = [abs(x) for x in ydata]
+            if cmd == 'integrate':
+                ydata = scipy.integrate.cumtrapz(ydata,xdata,initial=0)
+            if cmd == 'sum':
+                ydata = scipy.integrate.cumtrapz(ydata,dx=1,initial=0)
+            if cmd == 'rsum':
+                ydata = reversed(scipy.integrate.cumtrapz(list(reversed(ydata)),dx=1,initial=0))
+        yscaleddata = [ yy*float(args.yscale) for yy in ydata ]
+        ax.plot(xscaleddata, yscaleddata,label=csvfile)
+        numSeries=numSeries+1
+        
 if numSeries == 0:
     raise Exception("No data found")
 
@@ -126,7 +118,10 @@ if numSeries == 0:
 ###############################################################################
 handles, labels = ax.get_legend_handles_labels()
 labels = [ os.path.splitext(os.path.split(x)[-1])[0] for x in labels ]
-if numSeries > 1:
+prefix_len=len(os.path.commonprefix(labels))
+#labels = [ x[prefix_len:] for x in labels]
+
+if numSeries > 1 and numSeries <= 10:
     plt.legend(handles,labels)
 if args.title is None:
     title=', '.join(['%s=%s'%(key,str(value)) for (key,value) in where.iteritems()])
@@ -175,7 +170,24 @@ ax.set_ylim([ymin,ymax])
 # Output
 ###############################################################################
 sz=fig.get_size_inches()
-if args.width: sz[0] = width # in
-if args.height: sz[1] = height # in
+if args.width: sz[0] = args.width # in
+if args.height: sz[1] = args.height # in
 fig.set_size_inches(sz,forward=True)
 plt.savefig(args.output,dpi=args.dpi)
+exit()
+
+###############################################################################
+# Metadata
+###############################################################################
+# Use PIL to save some image metadata
+from PIL import Image
+from PIL import PngImagePlugin
+im = Image.open(args.output)
+meta = PngImagePlugin.PngInfo()
+for x in where:
+    meta.add_text(x, str(where[x]))
+meta.add_text('caption',args.caption)
+im.save(args.output, "png", pnginfo=meta)
+
+#im2 = Image.open(args.output)
+#print im2.info
